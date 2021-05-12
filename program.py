@@ -1,21 +1,34 @@
 import collections
 import config
+import requests
 
 Location = collections.namedtuple('Location', 'city state country')
+Weather = collections.namedtuple('Weather', 'location units temp condition')
 
 def main():
-    # Show the header
     show_header()
 
     # Get the location request
     location_text = input("Which city's weather would you like to check? (e.g. San Francisco, CA, US) \n")
     print(f"You selected {location_text}")
-    # Convert plaintext over to data we can use
+    
     Loc = convert_plaintext_location(location_text)
-
+    if not Loc:
+        print(f"Could not find any info about {location_text}.")
+        return
+    
     # Get report from the API
     data = call_weather_api(Loc)
+    if not data:
+        print(f"Could not get the weather for {location_text} from the API!")
+
     # Report the weather
+    location_name = get_location_name(Loc)
+    if data.units == 'imperial':
+        scale = "F"
+    else:
+        scale = "C"
+    print(f"The weather in {location_name} is {data.temp} {scale} and {data.condition}.")
 
 def show_header():
     print('--------------------------------')
@@ -32,7 +45,7 @@ def convert_plaintext_location(location_text):
 
     city = ""
     state = ""
-    country = "USA"
+    country = "US"
 
     if len(parts) == 1:
         city = parts[0].strip()
@@ -48,7 +61,7 @@ def convert_plaintext_location(location_text):
 
     return Location(city, state, country)
 
-def call_weather_api(Loc,Unit="imperial"):
+def call_weather_api(Loc,Units="imperial"):
     """
     Calls weather api with Loc tuple with specified temp unit
 
@@ -57,7 +70,7 @@ def call_weather_api(Loc,Unit="imperial"):
     """
     url = config.url
 
-    Unit = Unit.lower().strip()
+    Units = Units.lower().strip()
 
     if Loc.city:
         url += f"&city={Loc.city}"
@@ -65,12 +78,35 @@ def call_weather_api(Loc,Unit="imperial"):
         url += f"&state={Loc.state}"
     if Loc.country:
         url += f"&country={Loc.country}"
-    if Unit == "imperial":
+    if Units == "imperial":
         url += f"&units=imperial"
-    elif Unit == "metric":
+    elif Units == "metric":
         url += f"&units=metric"
 
-    print(f"Would call {url}")
+    response = requests.get(url)
+
+    if response.status_code in {400, 404, 500}:
+        print(f"Error: {response.text}")
+        return None
+
+    data = response.json()
+
+    return convert_api_to_weather(data, Loc)
+
+def convert_api_to_weather(data, Loc):
+    temp = data.get('forecast').get('temp')
+    wjson = data.get('weather')
+    condition = f"{wjson.get('category')}: {wjson.get('description').capitalize()}"
+
+    weather = Weather(Loc, data.get('units'), temp, condition)
+
+    return weather
+
+def get_location_name(location):
+    if not location.state:
+        return f"{location.city.capitalize()}, {location.country.upper()}"
+    else:
+        return f"{location.city.capitalize()}, {location.state.upper()}, {location.country.upper()}"
 
 if __name__ == "__main__":
     main()
